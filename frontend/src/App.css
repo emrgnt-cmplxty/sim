@@ -1,0 +1,256 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: #0b0e11;
+  color: #eaecef;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 13px;
+}
+
+.app {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 16px;
+  min-height: 100vh;
+  padding: 40px 20px;
+}
+
+.left-col,
+.right-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── Shared panel styles ─────────────────────── */
+.orderbook,
+.trades-panel,
+.depth-chart-panel {
+  width: 380px;
+  background: #161a1e;
+  border: 1px solid #2b3139;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid #2b3139;
+}
+
+.panel-header h2 {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.loading {
+  padding: 60px 20px;
+  text-align: center;
+  color: #848e9c;
+}
+
+/* ── Orderbook ───────────────────────────────── */
+.ob-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid #2b3139;
+}
+
+.ob-header h2 {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.status {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 3px 8px;
+  border-radius: 3px;
+}
+
+.status.connected {
+  color: #0ecb81;
+  background: rgba(14, 203, 129, 0.1);
+}
+
+.status.disconnected {
+  color: #f6465d;
+  background: rgba(246, 70, 93, 0.1);
+}
+
+.ob-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  padding: 8px 16px;
+  color: #848e9c;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid #2b3139;
+}
+
+.ob-columns span:nth-child(2),
+.ob-columns span:nth-child(3) {
+  text-align: right;
+}
+
+.ob-asks,
+.ob-bids {
+  display: flex;
+  flex-direction: column;
+}
+
+.ob-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  padding: 2px 16px;
+  position: relative;
+  line-height: 22px;
+  transition: background 0.1s;
+}
+
+.ob-row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.ob-row .price {
+  position: relative;
+  z-index: 1;
+}
+
+.ob-row .size,
+.ob-row .total {
+  text-align: right;
+  position: relative;
+  z-index: 1;
+  color: #b7bdc6;
+}
+
+.depth-bar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  pointer-events: none;
+  transition: width 0.15s ease;
+}
+
+.ask-bar {
+  background: rgba(246, 70, 93, 0.12);
+}
+
+.bid-bar {
+  background: rgba(14, 203, 129, 0.12);
+}
+
+.ask .price {
+  color: #f6465d;
+}
+
+.bid .price {
+  color: #0ecb81;
+}
+
+.spread-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px;
+  border-top: 1px solid #2b3139;
+  border-bottom: 1px solid #2b3139;
+  background: #1e2329;
+}
+
+.mid-price {
+  font-size: 18px;
+  font-weight: 700;
+  color: #eaecef;
+}
+
+.spread-label {
+  font-size: 11px;
+  color: #848e9c;
+  letter-spacing: 0.3px;
+}
+
+/* ── Recent Trades ───────────────────────────── */
+.trades-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  padding: 8px 16px;
+  color: #848e9c;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid #2b3139;
+}
+
+.trades-columns span:nth-child(2),
+.trades-columns span:nth-child(3) {
+  text-align: right;
+}
+
+.trades-list {
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.trade-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  padding: 2px 16px;
+  line-height: 22px;
+  transition: background 0.1s;
+}
+
+.trade-row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.trade-row.buy .trade-price {
+  color: #0ecb81;
+}
+
+.trade-row.sell .trade-price {
+  color: #f6465d;
+}
+
+.trade-qty,
+.trade-time {
+  text-align: right;
+  color: #b7bdc6;
+}
+
+/* scrollbar for trades */
+.trades-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.trades-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.trades-list::-webkit-scrollbar-thumb {
+  background: #2b3139;
+  border-radius: 2px;
+}
+
+/* ── Depth Chart ─────────────────────────────── */
+.depth-svg {
+  display: block;
+  width: 100%;
+}
+
