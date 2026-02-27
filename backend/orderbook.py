@@ -57,6 +57,11 @@ class Orderbook:
         self.orders: dict[str, Order] = {}  # id -> Order
         self.recent_trades: deque[Fill] = deque(maxlen=max_trades)
         self._new_fills: list[Fill] = []  # fills since last snapshot
+        self._last_mid: float = 100.0
+
+    @property
+    def last_mid(self) -> float:
+        return self._last_mid
 
     def place_order(self, owner: str, side: Side, price: float, qty: float) -> Order:
         order = Order(
@@ -164,6 +169,9 @@ class Orderbook:
         ba = asks[0][0] if asks else 0
         spread = ba - bb if bb and ba else 0
         mid_price = (bb + ba) / 2 if bb and ba else 0
+
+        if mid_price:
+            self._last_mid = round(mid_price, 2)
 
         return {
             "bids": bids,

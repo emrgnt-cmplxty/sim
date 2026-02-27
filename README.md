@@ -2,7 +2,7 @@
 
 Real-time orderbook with a Python backend, React frontend, and a REST API for building trading strategies.
 
-A FastAPI server simulates market activity — random orders around a drifting mid-price with momentum bias — and streams orderbook snapshots over WebSocket at ~10Hz. The React UI renders the orderbook, depth chart, recent trades, and strategy P&L.
+The backend is a pure orderbook engine exposing REST + WebSocket APIs. The simulator is a standalone process that generates market activity via the same API that strategies use. The React UI renders the orderbook, depth chart, recent trades, and strategy P&L.
 
 ## Quick Start
 
@@ -14,7 +14,14 @@ pip install -r requirements.txt
 uvicorn main:app --port 8765
 ```
 
-**Frontend** (terminal 2):
+**Simulator** (terminal 2):
+
+```bash
+cd backend
+python3 simulator.py --seed 42
+```
+
+**Frontend** (terminal 3):
 
 ```bash
 cd frontend
@@ -30,7 +37,7 @@ Open [http://localhost:5173](http://localhost:5173).
 backend/
 ├── main.py            # FastAPI app, REST + WebSocket endpoints
 ├── orderbook.py       # Order-level book with price-time priority matching
-├── simulator.py       # Market data generator with momentum bias
+├── simulator.py       # Standalone market simulator (separate process)
 ├── position.py        # Position & P&L tracker
 └── requirements.txt
 
@@ -49,9 +56,17 @@ frontend/
 
 ## How It Works
 
-1. The **simulator** places passive (non-crossing) limit orders on both sides, occasionally injecting aggressive orders that cross the spread to generate trades
-2. The **orderbook** tracks individual orders with IDs and ownership, matching with price-time priority. Fills are attributed to the order owner
-3. The **broadcast loop** sends snapshots (top 20 levels, recent trades, strategy P&L) to all WebSocket clients at ~10Hz
+```
+┌───────────────┐     ┌───────────────┐     ┌───────────────┐
+│  Backend      │     │  Simulator    │     │  Strategy     │
+│  (Orderbook   │◄────│  (separate    │     │  (separate    │
+│   + API)      │◄────│   process)    │     │   process)    │
+└───────────────┘     └───────────────┘     └───────────────┘
+```
+
+1. The **backend** is a pure orderbook engine — it accepts orders via REST, matches with price-time priority, and broadcasts snapshots over WebSocket at ~10Hz
+2. The **simulator** runs as a separate process and uses the same REST API as strategies (`POST /orders`, `DELETE /orders`, `POST /batch`). It places passive limit orders on both sides, occasionally injecting aggressive orders that cross the spread to generate trades
+3. The **strategy** (your code) connects via WebSocket for market data and REST for order management — it's an equal peer to the simulator
 4. The **React frontend** renders the orderbook, depth chart, trade ticker, and P&L panel from a single shared WebSocket stream
 
 ## Strategy API
