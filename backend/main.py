@@ -1,19 +1,18 @@
 import asyncio
 import json
 from contextlib import asynccontextmanager
+from typing import Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from orderbook import Orderbook, Side
-from simulator import Simulator
 from position import PositionTracker
 
 STRATEGY_OWNER = "strategy"
 
 orderbook = Orderbook()
-simulator = Simulator(orderbook, base_price=100.00)
 position_tracker = PositionTracker(STRATEGY_OWNER)
 
 clients: set[WebSocket] = set()
@@ -21,11 +20,8 @@ clients: set[WebSocket] = set()
 
 @asynccontextmanager
 async def lifespan(app):
-    sim_task = asyncio.create_task(simulator.start())
     broadcast_task = asyncio.create_task(broadcast_loop())
     yield
-    simulator.stop()
-    sim_task.cancel()
     broadcast_task.cancel()
 
 
@@ -56,7 +52,7 @@ async def broadcast_loop():
             strategy_fills = _process_fills()
             snapshot = orderbook.get_snapshot()
 
-            mid = snapshot["midPrice"] or simulator.mid
+            mid = snapshot["midPrice"] or orderbook.last_mid
             snapshot["strategyFills"] = strategy_fills
             snapshot["position"] = position_tracker.to_dict(mid)
 
@@ -81,6 +77,7 @@ class PlaceOrderRequest(BaseModel):
     side: str  # "buy" or "sell"
     price: float
     qty: float
+    owner: Optional[str] = None
 
 
 @app.get("/")
@@ -100,11 +97,13 @@ async def place_order(req: PlaceOrderRequest):
     if req.qty <= 0:
         raise HTTPException(400, "Quantity must be positive.")
 
-    order = orderbook.place_order(STRATEGY_OWNER, side, req.price, req.qty)
+    owner = req.owner or STRATEGY_OWNER
+    order = orderbook.place_order(owner, side, req.price, req.qty)
     _process_fills()
 
     return {
         "id": order.id,
+        "owner": order.owner,
         "side": order.side.value,
         "price": order.price,
         "qty": order.qty,
@@ -113,23 +112,30 @@ async def place_order(req: PlaceOrderRequest):
 
 
 @app.delete("/orders/{order_id}")
-async def cancel_order(order_id: str):
+async def cancel_order(order_id: str, owner: Optional[str] = Query(None)):
     order = orderbook.cancel_order(order_id)
     if not order:
         raise HTTPException(404, "Order not found.")
-    if order.owner != STRATEGY_OWNER:
-        # put it back — can't cancel market orders
+    # If an owner was specified, verify ownership
+    if owner and order.owner != owner:
         orderbook.orders[order.id] = order
         raise HTTPException(403, "Cannot cancel orders you don't own.")
     return {"cancelled": order_id}
 
 
 @app.get("/orders")
-async def list_orders():
-    orders = orderbook.get_orders_by_owner(STRATEGY_OWNER)
+async def list_orders(owner: Optional[str] = Query(None)):
+    if owner is None:
+        # Default: strategy orders for backwards compat
+        orders = orderbook.get_orders_by_owner(STRATEGY_OWNER)
+    elif owner == "all":
+        orders = [o for o in orderbook.orders.values() if o.remaining > 0]
+    else:
+        orders = orderbook.get_orders_by_owner(owner)
     return [
         {
             "id": o.id,
+            "owner": o.owner,
             "side": o.side.value,
             "price": o.price,
             "qty": o.qty,
@@ -141,11 +147,110 @@ async def list_orders():
 
 @app.get("/position")
 async def get_position():
-    mid = orderbook.best_bid() or simulator.mid
+    mid = orderbook.best_bid()
     ask = orderbook.best_ask()
     if mid and ask:
         mid = (mid + ask) / 2
+    else:
+        mid = orderbook.last_mid
     return position_tracker.to_dict(mid)
+
+
+# ── Book summary (simulator reads this) ──────────
+
+
+@app.get("/book/summary")
+async def book_summary():
+    best_bid = orderbook.best_bid()
+    best_ask = orderbook.best_ask()
+
+    bid_top_qty = 0.0
+    ask_top_qty = 0.0
+    if best_bid is not None:
+        bid_top_qty = sum(
+            o.remaining for o in orderbook.orders.values()
+            if o.side == Side.BUY and o.price == best_bid and o.remaining > 0
+        )
+    if best_ask is not None:
+        ask_top_qty = sum(
+            o.remaining for o in orderbook.orders.values()
+            if o.side == Side.SELL and o.price == best_ask and o.remaining > 0
+        )
+
+    market_bid_count = sum(
+        1 for o in orderbook.orders.values()
+        if o.side == Side.BUY and o.remaining > 0 and o.owner == "market"
+    )
+    market_ask_count = sum(
+        1 for o in orderbook.orders.values()
+        if o.side == Side.SELL and o.remaining > 0 and o.owner == "market"
+    )
+
+    return {
+        "bestBid": best_bid,
+        "bestAsk": best_ask,
+        "bidTopQty": round(bid_top_qty, 4),
+        "askTopQty": round(ask_top_qty, 4),
+        "marketBidCount": market_bid_count,
+        "marketAskCount": market_ask_count,
+    }
+
+
+# ── Batch endpoint (one round-trip for simulator) ──
+
+
+class BatchOrderItem(BaseModel):
+    side: str
+    price: float
+    qty: float
+    owner: Optional[str] = "market"
+
+
+class BatchRequest(BaseModel):
+    cancels: list[str] = []
+    orders: list[BatchOrderItem] = []
+    get_summary: bool = False
+
+
+@app.post("/batch")
+async def batch(req: BatchRequest):
+    # 1. Process cancels
+    cancelled = []
+    for oid in req.cancels:
+        order = orderbook.cancel_order(oid)
+        if order:
+            cancelled.append(oid)
+
+    # 2. Process placements
+    placed = []
+    for item in req.orders:
+        try:
+            side = Side(item.side.lower())
+        except ValueError:
+            continue
+        if item.price <= 0 or item.qty <= 0:
+            continue
+        owner = item.owner or "market"
+        order = orderbook.place_order(owner, side, item.price, item.qty)
+        placed.append({
+            "id": order.id,
+            "owner": order.owner,
+            "side": order.side.value,
+            "price": order.price,
+            "qty": order.qty,
+            "remaining": order.remaining,
+        })
+
+    # 3. Process fills
+    _process_fills()
+
+    result: dict = {"cancelled": cancelled, "placed": placed}
+
+    # 4. Optionally return book summary
+    if req.get_summary:
+        result["summary"] = await book_summary()
+
+    return result
 
 
 # ── WebSocket ────────────────────────────────────
@@ -157,7 +262,7 @@ async def websocket_endpoint(ws: WebSocket):
     clients.add(ws)
     try:
         snapshot = orderbook.get_snapshot()
-        mid = snapshot["midPrice"] or simulator.mid
+        mid = snapshot["midPrice"] or orderbook.last_mid
         snapshot["strategyFills"] = []
         snapshot["position"] = position_tracker.to_dict(mid)
         await ws.send_text(json.dumps(snapshot))
